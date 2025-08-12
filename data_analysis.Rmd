@@ -1,0 +1,269 @@
+---
+title: "Scent Data Analysis"
+author: "Jack Rechsteiner"
+date: "2025-06-19"
+output: 
+  github_document: 
+    toc: TRUE
+---
+
+```{r setup}
+##Set knitr options (show both code and output, show output w/o leading #)
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, comment=NA, fig.path = "Images/")
+
+#load tidyverse
+library("tidyverse")
+#loading country package for easy filtering
+library(r2country)
+```
+
+# Looking for outliers and such
+```{r}
+#reading in RDS
+fragrance_df <- 
+  readRDS('/Users/jack/Workshop/Scent Project/RDS_files/cleaned_fragrance_df.RDS') %>% 
+  #removing the rowwise grouping
+  ungroup() %>% 
+  #dropping duplicated rows
+  distinct()
+
+cleaned_fragrance_df <-
+  fragrance_df %>% 
+  #removing fragrances with a year before 1980 (1.2% of total dataset)
+  filter(year > 1980) %>% 
+  #keeping the url as unique id but moving it to the end so I don't have to keep looking at it
+  relocate(fragrance_url, .after = last_col()) 
+
+dupes_removed <-
+  cleaned_fragrance_df %>%
+  #finding all the EAU DE whatevers
+  filter(str_detect(fragrance_name, "EAU DE (EXTRAIT|PARFUM|TOILETTE)")) %>% 
+  #sorting alphabetically for my own sanity
+  arrange(fragrance_name) %>% 
+  #separating the columns into name and fragrance type
+  separate_wider_regex(fragrance_name, c(fragname =".+", fragtype = "EAU .+"), cols_remove = FALSE) %>% 
+  #grouping by fragrance name
+  group_by(fragname) %>% 
+  #keeping only a singular fragrance
+  distinct(fragname, .keep_all = TRUE) %>% 
+  #removing grouping
+  ungroup() %>% 
+  #dropping the separated columns to bind dfs back together
+  select(!fragname:fragtype)
+
+#this feels like a really dumb way to do this but I'm feeling dumb today
+#making a df with the opposite filter
+recleaned_fragrance_df <-
+  cleaned_fragrance_df %>%
+  #finding everything but the EAU DE fragrances
+  filter(!str_detect(fragrance_name, "EAU DE (EXTRAIT|PARFUM|TOILETTE)")) %>% 
+  #adding the other df back in
+  rbind(dupes_removed) %>% 
+  #also going to drop LA PETITE ROBE NOIRE EDT SO FRENCHY 2020 while I'm at it because it's a dupe of LA PETITE ROBE NOIRE EDP SO FRENCHY 2020
+  filter(!str_detect(fragrance_name, "LA PETITE ROBE NOIRE EDT SO FRENCHY 2020"))
+```
+
+## Total concept counts
+
+```{r}
+#storing concept words as lists to make the later code cleaner
+named_locations <- "Comores|Sweede|African|British|Cambodge|Phillipines|Asian|(Central|South|North) America(n)?|European|Somalie|Australie|England|West Indies|Calabria|Mediterranean|Sicily"
+source_based <- "Iodine|Mildew|Roots|Latex|Plastic|Sweaty|Algae|Nutty|Pencil|Milky|Sea|Fur|Organza|Almond|Ink|Animal|Soapy|Medicinal|Powdery|Cotton|Detergent|Salt|Laundry|Air-Freshner|Silk|Caramelized|Creamy|Garden|Grassy|Metal(l)?ic|Ocean|Honeyed|Smoky|Sugary|Candy|Salty|Spicy|Leather|Fruity|Orange|Herbal|Musky|Leaf|Rain|Shrub|Earth|Mossy|Zesty|Forest|Citrus|Ambery|Ozone|Camphoric|Lavender|Earthy|Floral|Woody"
+abstract_cross_modal <- "Culture|Fantasy|Nature|Cold|Soft|Tropical|Humid|Dry|Beach|Culinary|Mountain|Bitter|Breeze|Outdoor|Countryside|Yummy|Fields|Funfair|Chrismacy|Glitters|Desert|Mouth-Watering|Appetizing|Delicious|Bright|Darkness|Chrismas|Tender|Textured|Airy|Supple|Heady|Velvety|Luminous|Aquatic|Natural|Pure|Smooth|Holidays|Dark|Heat|Sweet|Hot|Marine|Light|Sunny|Deep|Warm|Colourful|Fresh|Radiant|Loud|Clean|Sparkling|Summer|Blooming|Spring|Night|Round|Winter|Autum|Day|City|Childhood"
+evaluative_persona <- "Artistic|Classic|Banal|Professional|Quircky|Witty|Aristocratic|Eccentric|Formal|Childish|Old-Fashioned|Oldie|Opulent|Avant Garde|Sickening|Iconic|Graceful|Flamboyant|Luscious|Masculine|Noble|Clean Cut|Modern|Minimalistic|Daring|Bold|Luxury|Suave|Fashion|Authentic|Innocent|Classy|Primitive|Mystical|Original|Oriental|Girly|Sophisticated|Unisexe|Affirmed|Self-Confident|Carnal|Feminine|Dynamic|Sporty|Exotic|Elegant|Romantic|Generous|Casual|Everyday|Heritage|Greedy|Craftmanship"
+effect_emotion <- "Serene|Tranquility|Relaxing|Reassuring|Melancholy|Nostalgia|(E|I)nvigorating|Stimulating|Exciting|Energetic|Comfortable|Joyful|Energyzing|Happy|Cheerful|Freedom|Optimistic"
+intensity <- "Imperceptible|Feathers|Aggressive|Discrete|Pervasive|Transparent|Wrapping|Enveloping|Watery|Strong|Vaporous|Noticeable|Heavy|Powerful|Robust|Intense|Rich"
+composition <- "Aldehydic|Astringent|Resinous|Mineral|Chemical|Fixative|Acid"
+odor_fragrance_words <- "Pungent|Gourmand|Vertical|Aromatic"
+colors <- "Blue|Silver|Red|Yellow|Pink|Green|Gold|Grey|Purple|Black|Brown|White"
+
+recleaned_fragrance_df %>% 
+  #looking at concepts specifically
+  select(concepts) %>% 
+  #turning the comma strings of concepts into a one concept per row
+  separate_longer_delim(cols = "concepts", delim = ", ") %>% 
+  #somehow that introduced a singular blank row, so I'll filter that out
+  filter(concepts != "") %>% 
+  #converting all strings to sentence case
+  mutate(across(concepts, ~ str_to_title(.x))) %>% 
+  #counting the times each concept occurs
+  count(concepts) %>% 
+  #ordering concepts by the number of times they appear
+  arrange(n) %>% 
+  #using case_when and str_detect to sort the concepts into different categories
+  mutate(concept_bin = case_when(
+    #using str_flatten and the country_names data from r2country to save some time
+    str_detect(concepts, str_flatten(country_names$name, collapse = "|")) ~ "named location",
+    str_detect(concepts, named_locations) ~ "named location",
+    
+    str_detect(concepts, source_based) ~ "source-based",
+    str_detect(concepts, abstract_cross_modal) ~ "abstract/cross-modal",
+    str_detect(concepts, evaluative_persona) ~ "evaluative/persona",
+    
+    str_detect(concepts, effect_emotion) ~ "effect/emotion",
+    str_detect(concepts, intensity) ~ "intensity",
+    str_detect(concepts, composition) ~ "composition",
+    
+    
+    str_detect(concepts, "Rehash|Gloves|Cristals") ~ "uncertain",
+    #some of these are just smell adjectives 
+    str_detect(concepts, odor_fragrance_words) ~ "odor/fragrance words",
+    #i'm doing a separate category for colors
+    str_detect(concepts, colors) ~ "color",
+    .default = "unassigned")) 
+
+# recleaned_fragrance_df %>% 
+#   filter(str_detect(concepts, "Sickening"))
+```
+
+## Concepts by price and gender
+```{r}
+#gender graphs
+recleaned_fragrance_df %>% 
+  #turning the comma strings of concepts into a one concept per row
+  separate_longer_delim(cols = "concepts", delim = ", ") %>% 
+  #somehow that introduced a singular blank row, so I'll filter that out
+  filter(concepts != "") %>% 
+  #selecting the relevant columns
+  select(price, gender, concepts) %>% 
+  #grouping by gender to analyze concept frequencies within gender
+  group_by(gender) %>% 
+  #counting concepts
+  count(concepts) %>% 
+  #arranging the counts from highest to lowest
+  arrange(desc(n)) %>% 
+  ungroup() %>% 
+  #splitting the df into multiple dfs for each gender
+  split(., f = .$gender) %>%
+  #mapping the multiple dfs to just give the 7 highest count concepts using 1:7
+  ##or the next 7 highest using 8:14
+  map(., ~ slice(.x, 8:14)) %>% 
+  #mapping the dfs to make column charts for the counts of concepts with a static y-axis limit to help comparability
+  map(., ~ ggplot(.x, aes(x = concepts, y = n)) + geom_col() + ylim(0, 8000))
+
+#price graphs
+recleaned_fragrance_df %>% 
+  #turning the comma strings of concepts into a one concept per row
+  separate_longer_delim(cols = "concepts", delim = ", ") %>% 
+  #somehow that introduced a singular blank row, so I'll filter that out
+  filter(concepts != "") %>% 
+  #selecting the relevant columns
+  select(price, gender, concepts) %>% 
+  #grouping by price to analyze concept frequencies within price
+  group_by(price) %>% 
+  #counting concepts
+  count(concepts) %>% 
+  #arranging the counts from highest to lowest
+  arrange(desc(n)) %>% 
+  ungroup() %>% 
+  #splitting the df into multiple dfs for each price
+  split(., f = .$price) %>%
+  #mapping the multiple dfs to just give the 7 highest count concepts using 1:7
+  ##or the next 7 highest using 8:14
+  map(., ~ slice(.x, 8:14)) %>% 
+  #mapping the dfs to make column charts for the counts of concepts with a static y-axis limit to help comparability
+  map(., ~ ggplot(.x, aes(x = concepts, y = n)) + geom_col() + ylim(0, 8000))
+
+#price and gender graphs
+recleaned_fragrance_df %>% 
+  #turning the comma strings of concepts into a one concept per row
+  separate_longer_delim(cols = "concepts", delim = ", ") %>% 
+  #somehow that introduced a singular blank row, so I'll filter that out
+  filter(concepts != "") %>% 
+  #selecting the relevant columns
+  select(price, gender, concepts) %>% 
+  #creating a column that combines gender and price to use for grouping
+  mutate(gender_price = str_c(gender, " - ", price)) %>% 
+  #grouping by gender_price to analyze concept frequencies within gender_price
+  group_by(gender_price) %>% 
+  #counting concepts
+  count(concepts) %>% 
+  #arranging the counts from highest to lowest
+  arrange(desc(n)) %>% 
+  #splitting the df into multiple dfs for each gender_price
+  split(., f = .$gender_price) %>% 
+  #mapping the multiple dfs to just give the 7 highest count concepts using 1:7
+  ##or the next 7 highest using 8:14
+  map(., ~ slice(.x, 8:14)) %>% 
+  #mapping the dfs to make column charts for the counts of concepts with a static y-axis limit to help comparability
+  map(., ~ ggplot(.x, aes(x = concepts, y = n)) + geom_col() + ylim(0, 8000))
+```
+
+
+## Getting concept scores for each fragrance
+
+```{r}
+frags_with_concept_scores <- 
+  recleaned_fragrance_df %>% 
+  mutate(concepts_copy = concepts,
+         across(concepts_copy, ~ str_to_title(.x)),
+         across(concepts_copy, ~ str_replace_all(.x, str_flatten(country_names$name, collapse = "|"), "named location")),
+         #str_replace_all wasn't working with the usual c() method to combine replacements together,
+         ##so I just went with a less elegant solution
+         across(concepts_copy, ~ str_replace_all(.x, named_locations, "named location")),
+         across(concepts_copy, ~ str_replace_all(.x, source_based, "source-based")),
+         across(concepts_copy, ~ str_replace_all(.x, abstract_cross_modal, "abstract/cross modal")),
+         across(concepts_copy, ~ str_replace_all(.x, evaluative_persona, "evaluative/persona")),
+         across(concepts_copy, ~ str_replace_all(.x, effect_emotion, "effect/emotion")),
+         across(concepts_copy, ~ str_replace_all(.x, intensity, "intensity")),
+         across(concepts_copy, ~ str_replace_all(.x, composition, "composition")),
+         across(concepts_copy, ~ str_replace_all(.x, odor_fragrance_words, "odor/fragrance words")),
+         across(concepts_copy, ~ str_replace_all(.x, colors, "colors")),
+         location_score = str_count(concepts_copy, "named location"),
+         sourcebased_score = str_count(concepts_copy, "source-based"),
+         abstract_score = str_count(concepts_copy, "abstract/cross modal"),
+         evaluative_score = str_count(concepts_copy, "evaluative/persona"),
+         effect_score = str_count(concepts_copy, "effect/emotion"),
+         intensity_score = str_count(concepts_copy, "intensity"),
+         composition_score = str_count(concepts_copy, "composition"),
+         fragrancewords_score = str_count(concepts_copy, "odor/fragrance words"),
+         color_score = str_count(concepts_copy, "colors")) %>% 
+  select(!concepts_copy)
+```
+
+# Identifying brands with lots of price variation
+
+```{r}
+recleaned_fragrance_df %>% 
+  group_by(brand_name) %>% 
+  count(price, name = "price_count") %>% 
+  add_count(brand_name, name = "brand_count") %>% 
+  filter(brand_count == 3)
+
+recleaned_fragrance_df %>% 
+  group_by(brand_name) %>% 
+  count(price, name = "price_count") %>% 
+  add_count(brand_name, name = "brand_count") %>% 
+  filter(brand_count == 2)
+```
+
+# Getting counts of olfactive family, olfactive subfamily, and fragrance classifier
+
+```{r}
+recleaned_fragrance_df %>% 
+  count(olfactive_family)
+
+recleaned_fragrance_df %>% 
+  count(olfactive_subfamily)
+
+recleaned_fragrance_df %>% 
+  count(frag_classifier)
+```
+
+# Checking ingredients against Poulton (2020)
+```{r}
+poulton_scents <- "almond|ambergris|apricot|caraway seed|cardamom|cedar|cedramber|chamomile|civet|clove|dark oud|floral ozone|frankincense|geosmin|geranium|ginger|grapefruit|green fig|guaiacol|honeysuckle|ladbanum|lavender|leather|lilac|lily of the valley|magnolia|mint|musk|nutmeg|orange blossom|patchouli|rosewood|sandalwood|sea minerals|sweet vanilla|vetiver|wattle|white musk|white tea|wintergreen"
+
+recleaned_fragrance_df %>% 
+  head() %>% 
+  mutate(across(ingredients, ~ str_to_lower(.x))) %>% 
+  filter(str_detect(ingredients, poulton_scents))
+
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

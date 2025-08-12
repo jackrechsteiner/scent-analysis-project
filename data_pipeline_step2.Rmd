@@ -1,0 +1,176 @@
+---
+title: "Scent-processing Pipeline"
+author: "Jack Rechsteiner"
+date: "05/15/2025"
+output: 
+  github_document: 
+    toc: TRUE
+---
+
+```{r setup}
+##Set knitr options (show both code and output, show output w/o leading #)
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, comment=NA, fig.path = "Images/")
+
+#load tidyverse
+library("tidyverse")
+
+#load xml2
+library(xml2)
+
+#load lme4 and lmerTest
+library(lme4)
+library(lmerTest)
+
+#load rvest, readr, and selenider
+library(rvest)
+library(readr)
+library(selenider)
+
+#loading chromote for selenider()
+library(chromote)
+
+#loading curl to make sure connections can be opened
+library(curl)
+```
+
+# Data pipeline
+
+```{r selenider}
+# # reading in RDS file
+# fragrance_df <- 
+#   readRDS(file = "/Users/jack/Workshop/Scent Project/RDS_files/noJS/fragrance_df_26725_to_29413_noJS.RDS")
+
+# starting up the selenider_session() with increased timeout setting
+loop_session <- 
+  selenider_session(timeout = 120)
+
+#making a new column to store js elements
+fragrance_df_list <- 
+  fragrance_df %>% 
+  mutate(js_list = list("list"))
+
+#this loops through all the urls in the dataframe and extracts the javascript elements
+for (x in seq_len(nrow(fragrance_df_list))){
+  #opening the relevant url
+  open_url(session = loop_session, fragrance_df_list[[1]][[x]])
+  
+  #forcing the loop to wait for the dang page to load
+  Sys.sleep(2)
+  
+  #saving the element to the appropriate cell
+  fragrance_df_list$js_list[[x]] <- 
+    #calling the url that was opened at the beginning
+    get_session() %>% 
+    #finding all the js elements of interest
+    find_elements("dl.text-14") %>% 
+    #turning those elements into text
+    sapply(elem_text) %>% 
+    #turning all the text into one list
+    list() 
+}
+
+#saveRDS(fragrance_df_list, file = "/Users/jack/Workshop/Scent Project/RDS_files/with_JS/fragrance_df_26725_to_29413_with_JS.RDS")
+```
+
+```{r}
+#stitching together the full dataframe
+#Creating a list of file names to be iterated over with map()
+file_list <- 
+  list.files("RDS_files/with_JS", pattern="*.RDS", full.names=TRUE)
+
+#Using map_df() to create a dataframe  from reading in all the RDS files
+full_fragrance_df <-
+  map_df(file_list, readRDS)
+
+#identifying the rows that only have "list" in the js_list column
+missing_js <-
+  full_fragrance_df %>% 
+  filter(js_list == "list") 
+
+# starting up another selenider_session() with increased timeout setting
+loop_session2 <- 
+  selenider_session(timeout = 120)
+
+#looping over the missing rows
+for (x in seq_len(nrow(missing_js))){
+  #opening the relevant url
+  open_url(session = loop_session2, missing_js[[1]][[x]])
+  
+  #forcing the loop to wait for the dang page to load
+  Sys.sleep(2)
+  
+  #saving the element to the appropriate cell
+  missing_js$js_list[[x]] <- 
+    #calling the url that was opened at the beginning
+    get_session() %>% 
+    #finding all the js elements of interest
+    find_elements("dl.text-14") %>% 
+    #turning those elements into text
+    sapply(elem_text) %>% 
+    #turning all the text into one list
+    list() 
+}
+
+#adding the results back in
+full_fragrance_df <- 
+  rows_update(full_fragrance_df, missing_js, by = "fragrance_url") 
+
+#turns out there were some others missing with nothing in the column
+missing_js2 <- 
+  full_fragrance_df %>% 
+  unnest(cols = c(js_list)) %>% 
+  filter(lengths(js_list) == 0)
+
+#looping over the missing rows
+for (x in seq_len(nrow(missing_js2))){
+  #opening the relevant url
+  open_url(session = loop_session2, missing_js2[[1]][[x]])
+  
+  #forcing the loop to wait for the dang page to load
+  Sys.sleep(2)
+  
+  #saving the element to the appropriate cell
+  missing_js2$js_list[[x]] <- 
+    #calling the url that was opened at the beginning
+    get_session() %>% 
+    #finding all the js elements of interest
+    find_elements("dl.text-14") %>% 
+    #turning those elements into text
+    sapply(elem_text) %>% 
+    #turning all the text into one list
+    list() 
+}
+
+#adding the results back in
+full_fragrance_df <- 
+  rows_update(full_fragrance_df, missing_js2, by = "fragrance_url") 
+
+cleaned_fragrance_df <- 
+  full_fragrance_df %>% 
+  #unnesting the js_list col to make it easier to select within
+  unnest(cols = c(js_list)) %>% 
+  #some of the pages only had 3 elements (roughly 600), instead of the necessary 4, so those will be filtered out
+  filter(lengths(js_list) != 3) %>% 
+  #some of the fragrances (18 to be exact) also don't have descriptions, so we'll drop those too
+  filter(description != "") %>% 
+  #and there is exactly 1 NA fragrance because the URL was not working
+  filter(fragrance_url != "https://www.wikiparfum.com/en/fragrances/kashmir	") %>% 
+  #applying rowwise() to make all the js elements end up in their relevant columns
+  rowwise() %>% 
+  #putting the elements from js_list into the named columns
+  mutate(origin = js_list[1],
+         gender = js_list[2],
+         year = js_list[3],
+         concepts = js_list[4]) %>% 
+  select(!js_list)
+
+#saveRDS(full_fragrance_df, file = "/Users/jack/Workshop/Scent Project/RDS_files/full_fragrance_df.RDS")
+#saveRDS(cleaned_fragrance_df, file = "/Users/jack/Workshop/Scent Project/RDS_files/cleaned_fragrance_df.RDS")
+```
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```

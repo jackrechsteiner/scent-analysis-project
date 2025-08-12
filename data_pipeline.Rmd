@@ -1,0 +1,114 @@
+---
+title: "Scent-processing Pipeline"
+author: "Jack Rechsteiner"
+date: "05/15/2025"
+output: 
+  github_document: 
+    toc: TRUE
+---
+
+```{r setup}
+##Set knitr options (show both code and output, show output w/o leading #)
+knitr::opts_chunk$set(echo = TRUE, include = TRUE, comment=NA, fig.path = "Images/")
+
+#load tidyverse
+library("tidyverse")
+
+#load xml2
+library(xml2)
+
+#load lme4 and lmerTest
+library(lme4)
+library(lmerTest)
+
+#load rvest, readr, and selenider
+library(rvest)
+library(readr)
+library(selenider)
+
+#loading chromote for selenider()
+library(chromote)
+
+#loading curl to make sure connections can be opened
+library(curl)
+```
+
+# Data pipeline
+
+```{r selenider}
+# creating an object with all sitemap xml files
+sitemap_list <- c("https://www.wikiparfum.com/fragrances_sitemap_en_0.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_1.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_2.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_3.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_4.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_5.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_6.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_7.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_8.xml", "https://www.wikiparfum.com/fragrances_sitemap_en_9.xml")
+
+# starting up the selenider_session() with increased timeout setting
+selenider_session(timeout = 60)
+
+# getting usable URLS from the sitemap list
+fragrance_url_full <- read_lines(sitemap_list) %>% 
+  str_subset("<loc>https://.+/en/") %>% 
+  str_replace(".*<loc>", "") %>% 
+  str_replace("</loc>", "") 
+
+# trial run with 5000 urls
+fragrance_url <- fragrance_url_full[26725:29413]
+
+# setting up character vectors to use as columns in the tibble
+fragrance_name <- vector(mode = "character", length = length(fragrance_url))
+brand_name <- vector(mode = "character", length = length(fragrance_url))
+ingredients <- vector(mode = "character", length = length(fragrance_url))
+olfactive_family <- vector(mode = "character", length = length(fragrance_url))
+olfactive_subfamily <- vector(mode = "character", length = length(fragrance_url))
+frag_classifier <- vector(mode = "character", length = length(fragrance_url))
+price <- vector(mode = "character", length = length(fragrance_url))
+description <- vector(mode = "character", length = length(fragrance_url))
+origin <- vector(mode = "character", length = length(fragrance_url))
+gender <- vector(mode = "character", length = length(fragrance_url))
+year <- vector(mode = "character", length = length(fragrance_url))
+concepts <- vector(mode = "character", length = length(fragrance_url))
+
+# setting up the tibble to hold the info
+fragrance_df <- tibble(fragrance_url, fragrance_name, brand_name, ingredients, olfactive_family, olfactive_subfamily, frag_classifier, price, description, origin, gender, year, concepts)
+
+# this for loop essentially goes through each URL and opens it as a session that is used within the loop to get all the relevant HTML and JS elements and saving them to the row number of the respective column for each element
+for (x in seq_along(fragrance_url)){
+  #saving the source HTML to use to extract all the things that can be read without javascript
+  ##i was getting error messages about being unable to open connections, so hopefully curl() fixes that
+  #page_html <- curl(fragrance_url[x]) %>% read_html()
+  ##curl() didn't fix it
+  session <- open_url(fragrance_url[x])
+  page_html <- session %>% get_page_source()
+  fragrance_df$fragrance_name[[x]] <- 
+    page_html %>% html_element("h1") %>% html_text()
+  fragrance_df$brand_name[[x]] <- 
+    page_html %>% html_element("h6") %>% html_text()
+  fragrance_df$ingredients[[x]] <-
+    page_html %>% html_element(".flex.mb-6") %>% html_children() %>% html_text() %>% toString()
+  fragrance_df$olfactive_family[[x]] <-
+    page_html %>% html_element(".order-1") %>% html_children() %>% html_text() %>% .[2] 
+  fragrance_df$olfactive_subfamily[[x]] <-
+    page_html %>% html_element(".order-2") %>% html_children() %>% html_text() %>% .[2] 
+  fragrance_df$frag_classifier[[x]] <-
+    page_html %>% html_element("dd") %>% html_text()
+  fragrance_df$price[[x]] <-
+    page_html %>% html_element("dd.gap-2") %>% html_elements(".text-black") %>% html_text() %>% toString()
+  fragrance_df$description[[x]] <-
+    page_html %>% html_element(".pt-1") %>% html_text()
+  ## lets see if not doing the js stuff will avoid timeouts
+  #  fragrance_df$origin[[x]] <-
+  #   session |> find_element("dl.text-14") %>% elem_text()
+  # fragrance_df$gender[[x]] <-
+  #   session |> find_elements("dl.text-14") %>% sapply(elem_text) %>% .[2]
+  # fragrance_df$year[[x]] <-
+  #   session |> find_elements("dl.text-14") %>% sapply(elem_text) %>% .[3]
+  # fragrance_df$concepts[[x]] <-
+  #   session |> find_elements("dl.text-14") %>% sapply(elem_text) %>% .[4]
+}
+
+#saveRDS(fragrance_df, file = "/Users/jack/Workshop/Scent Project/RDS files/fragrance_df_26725_to_29413_noJS.RDS")
+
+```
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
