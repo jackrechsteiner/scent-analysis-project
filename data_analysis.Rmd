@@ -136,7 +136,7 @@ split_concepts_df |>
 ```
 
 
-```{r}
+```{r conceptbinsbyprice}
 #comparing concept bins across prices
 split_concepts_df |> 
   #group by price
@@ -149,7 +149,10 @@ split_concepts_df |>
          total = sum(n)) |> 
   #split df by price for easier comparison
   (\(.)split(., f = .$price))()
+```
 
+
+```{r}
 #this section is represented with a graph later on but i'm leaving this code here for posterity
 # #comparing individual concepts by price and gender
 # split_concepts_df |> 
@@ -169,8 +172,10 @@ split_concepts_df |>
 #   (\(.) split(., f = .$gender_price))() |> 
 #   #mapping to get the first 14 concepts for each group
 #   map(\(df) slice(df, 8:14))
+```
 
-  
+
+```{r colorsbyprice}
 #looking at individual colors across price points
 split_concepts_df |> 
   #filtering to only keep color concepts
@@ -185,11 +190,27 @@ split_concepts_df |>
          total = sum(n)) |> 
   #split df by price for easier comparison
   (\(.)split(., f = .$price))()
+```
 
+```{r emotionsbyprice}
+#looking at individual colors across price points
+split_concepts_df |> 
+  #filtering to only keep color concepts
+  filter(concept_bin == "effect/emotion") |> 
+  #group by price
+  group_by(price) |> 
+  #get counts for concept bins
+  count(concepts) |> 
+  #calculate counts as within-group percentages
+  mutate(percent  = (n / sum(n) * 100),
+         #get within-group totals while I'm at it
+         total = sum(n)) |> 
+  #split df by price for easier comparison
+  (\(.)split(., f = .$price))()
 ```
 
 ## Concepts by price and gender
-```{r}
+```{r gendergraphs}
 #gender graphs
 recleaned_fragrance_df %>% 
   #turning the comma strings of concepts into a one concept per row
@@ -212,7 +233,10 @@ recleaned_fragrance_df %>%
   map(., ~ slice(.x, 8:14)) %>% 
   #mapping the dfs to make column charts for the counts of concepts with a static y-axis limit to help comparability
   map(., ~ ggplot(.x, aes(x = concepts, y = n)) + geom_col() + ylim(0, 8000))
+```
 
+
+```{r pricegraphs}
 #price graphs
 recleaned_fragrance_df %>% 
   #turning the comma strings of concepts into a one concept per row
@@ -235,7 +259,10 @@ recleaned_fragrance_df %>%
   map(., ~ slice(.x, 8:14)) %>% 
   #mapping the dfs to make column charts for the counts of concepts with a static y-axis limit to help comparability
   map(., ~ ggplot(.x, aes(x = concepts, y = n)) + geom_col() + ylim(0, 8000))
+```
 
+
+```{r priceandgendergraphs}
 #price and gender graphs
 recleaned_fragrance_df %>% 
   #turning the comma strings of concepts into a one concept per row
@@ -292,6 +319,8 @@ frags_with_concept_scores <-
          composition_jargon_score = str_count(concepts_copy, "composition"),
          color_score = str_count(concepts_copy, "colors")) %>% 
   select(!concepts_copy)
+
+frags_with_concept_scores
 ```
 
 # Identifying brands with lots of price variation
@@ -309,11 +338,15 @@ recleaned_fragrance_df %>%
   add_count(brand_name, name = "brand_count") %>% 
   filter(brand_count == 2)
 
-#going to use the Chopard fragrances as a case study
-
+#creating csv to use the Chopard fragrances as a case study
 # recleaned_fragrance_df %>% 
 #   filter(brand_name == "Chopard") |> 
 #   write_csv("Chopard_fragrances.csv")
+
+#creating csv to use the 4711 fragrances as a case study
+# recleaned_fragrance_df %>%
+#   filter(brand_name == "4711") |> 
+#    write_csv("4711_fragrances.csv")
 ```
 
 # Getting counts of olfactive family, olfactive subfamily, and fragrance classifier
