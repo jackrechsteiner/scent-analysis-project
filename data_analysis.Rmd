@@ -197,10 +197,18 @@ split_concepts_df |>
 split_concepts_df |> 
   #filtering to only keep color concepts
   filter(concept_bin == "effect/emotion") |> 
+  mutate(combined_emotions = case_when(
+    str_detect(concepts, "Serene|Tranquility|Relaxing|Reassuring|Comfortable|Melancholy|Nostalgia") ~ "Serene/Tranquility/Relaxing/Reassuring/Comfortable/Melancholy/Nostalgia",
+    str_detect(concepts, "(E|I)nvigorating|Stimulating|Exciting|Energetic|Energyzing") ~ "Invigorating/Stimulating/Exciting/Energetic/Energyzing",
+    str_detect(concepts, "Joyful|Happy|Cheerful") ~ "Joyful/Happy/Cheerful",
+    #str_detect(concepts, "Freedom|Optimistic") ~ "Freedom/Optimistic",
+    str_detect(concepts, "Freedom|Optimistic") ~ "Freedom/Optimistic",
+    .default = "ERROR")
+  ) |> 
   #group by price
   group_by(price) |> 
   #get counts for concept bins
-  count(concepts) |> 
+  count(combined_emotions) |> 
   #calculate counts as within-group percentages
   mutate(percent  = (n / sum(n) * 100),
          #get within-group totals while I'm at it
